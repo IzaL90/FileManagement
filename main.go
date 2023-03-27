@@ -1,23 +1,18 @@
 package main
 
 import (
-	"bufio"
 	"database/sql"
-	"encoding/base64"
 	b64 "encoding/base64"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
-	
 )
 
 type File struct {
@@ -82,57 +77,10 @@ func getFilesFromDB() ([]File, error) {
 func main() {
 	var err error
 	db, err = getDbConnection()
-	file, err := os.Open("hej.txt")
-	if err != nil {
-		log.Fatal(err)
+	if err!= nil{
+		panic(err.Error())
 	}
-	fmt.Println(*file)
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fmt.Println(line)
-	}
-	data := "go"
-	sEnc := b64.StdEncoding.EncodeToString([]byte(data))
-	fmt.Println(sEnc)
-	sDec, _ := b64.StdEncoding.DecodeString(sEnc)
-	fmt.Println(string(sDec))
-	fmt.Println()
-	uEnc := b64.URLEncoding.EncodeToString([]byte(data))
-	fmt.Println(uEnc)
-	uDec, _ := b64.URLEncoding.DecodeString(uEnc)
-	fmt.Println(string(uDec))
-	name := uEnc
-	create_date := time.Now()
-	extension := ".txt"
-	size := len(uEnc)
-	fmt.Println(name, create_date, extension, size)
 	
-	var id int
-	var nam string
-	var content string
-	err = db.QueryRow("SELECT file_info.id, file_info.name, file_content.content "+
-		"FROM file_info "+
-		"INNER JOIN file_content ON file_info.id = file_content.file_info_id "+
-		"WHERE file_info.id = ?", 1).Scan(&id, &nam, &content)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("File id: %d\nFile name: %s\nFile content: %s\n", id, nam, content)
-	decodedContent, err := base64.StdEncoding.DecodeString(content)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = ioutil.WriteFile(nam, decodedContent, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("File %s downloaded successfully\n", nam)
-	filee, err := os.Open(nam)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(*filee)
 	router := gin.Default()
 	router.GET("/files", func(c *gin.Context) {
 		files, err := getFilesFromDB()
@@ -148,29 +96,7 @@ func main() {
 	})
 	fmt.Println(filesByID(1))
 	router.GET("/files/:id", GetId)
-	router.POST("/file", func(c *gin.Context) {
-		var file File
-		var extensionn = filepath.Ext(file.name)
-		var namee = file.name[0 : len(file.name)-len(extensionn)]
-		stmt, err := db.Prepare("INSERT INTO file_content(content, file_info_id) VALUES (?, ?)")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer stmt.Close()
-		result, err := stmt.Exec(uEnc, id, namee)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(result)
-		lastInsertId, err := result.LastInsertId()
-		if err != nil {
-			panic(err.Error())
-		}
-		fmt.Println(lastInsertId)
-		id := lastInsertId
-
-		c.Redirect(http.StatusFound, "/files/"+strconv.Itoa(int(id)))
-	})
+	router.POST("/file", PostFile)
 	router.PUT("/files/:id", updateFile)
 	router.DELETE("/files/:id", deleteFile)
 
@@ -257,4 +183,36 @@ func deleteFile(c *gin.Context) {
 	_, a := db.Exec("DELETE file_info WHERE id = ?", id)
 	fmt.Println(a)
 
+}
+
+func PostFile(c *gin.Context) {
+	var file File
+	var id int
+	var extensionn = filepath.Ext(file.name)
+	var namee = file.name[0 : len(file.name)-len(extensionn)]
+	data := "go"
+	sEnc := b64.StdEncoding.EncodeToString([]byte(data))
+	fmt.Println(sEnc)
+	sDec, _ := b64.StdEncoding.DecodeString(sEnc)
+	fmt.Println(string(sDec))
+	fmt.Println()
+	uEnc := b64.URLEncoding.EncodeToString([]byte(data))
+	stmt, err := db.Prepare("INSERT INTO file_content(content, file_info_id) VALUES (?, ?)")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stmt.Close()
+	result, err := stmt.Exec(uEnc, id, namee)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(result)
+	lastInsertId, err := result.LastInsertId()
+	if err != nil {
+		panic(err.Error())
+	}
+	fmt.Println(lastInsertId)
+	idd := lastInsertId
+
+	c.Redirect(http.StatusFound, "/files/"+strconv.Itoa(int(idd)))
 }
