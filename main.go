@@ -35,7 +35,7 @@ func getDbConnection() (*sql.DB, error) {
 		AllowNativePasswords: false,
 	}
 	_ = godotenv.Load("pass.env")
-	
+
 	secretKey := os.Getenv("SECRET_KEY")
 	dsn := "root:" + secretKey + "@tcp(127.0.0.1:3306)/files"
 	db, err = sql.Open("mysql", cfg.FormatDSN())
@@ -77,24 +77,13 @@ func getFilesFromDB() ([]File, error) {
 func main() {
 	var err error
 	db, err = getDbConnection()
-	if err!= nil{
+	if err != nil {
 		panic(err.Error())
 	}
-	
+
 	router := gin.Default()
-	router.GET("/files", func(c *gin.Context) {
-		files, err := getFilesFromDB()
-		if err != nil {
-			c.AbortWithStatus(http.StatusInternalServerError)
-			return
-		}
-		if len(files) == 0 {
-			c.IndentedJSON(http.StatusNotFound, gin.H{"message": "file not found"})
-			return
-		}
-		c.IndentedJSON(http.StatusOK, files)
-	})
-	fmt.Println(filesByID(1))
+	router.GET("/files", GetFiles)
+	fmt.Println(getFileByID(1))
 	router.GET("/files/:id", GetId)
 	router.POST("/file", PostFile)
 	router.PUT("/files/:id", updateFile)
@@ -112,7 +101,7 @@ func GetId(c *gin.Context) {
 	}
 	log.Print(err)
 
-	files, err := filesByID(intID)
+	files, err := getFileByID(intID)
 
 	if files.id == 0 {
 		c.IndentedJSON(http.StatusNotFound, gin.H{"message": "id not found"})
@@ -137,7 +126,7 @@ func getAllFiles(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, files)
 }
 
-func filesByID(id int) (File, error) {
+func getFileByID(id int) (File, error) {
 	var err error
 	var file File
 
@@ -170,26 +159,49 @@ func updateFile(c *gin.Context) {
 	query := "UPDATE file_info SET name = ?, extension = ?, size = ? WHERE id = ?"
 	_, err := db.Exec(query, file.name, file.extension, file.size, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Something went wrong"})
 		return
 	}
+	fmt.Println(err.Error())
 	c.JSON(http.StatusOK, gin.H{"message": "File updated successfully"})
 }
 
 func deleteFile(c *gin.Context) {
 
+	var fileExist bool
 	id := c.Param("id")
-	c.Redirect(http.StatusFound, "/files/")
-	_, a := db.Exec("DELETE file_info WHERE id = ?", id)
-	fmt.Println(a)
+	err := db.QueryRow("Select case count(1) when 0 then false else true end FROM file_info WHERE id=?", id).Scan(&fileExist)
+	if err != nil {
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"message": "Something went wrong"})
+		return
 
+	}
+	fmt.Println(err)
+
+	log.Print()
+	if fileExist {
+		_, err = db.Exec("DELETE FROM file_info WHERE id=?", id)
+		if err != nil {
+			c.IndentedJSON(http.StatusInternalServerError, gin.H{"message": "Something went wrong"})
+			return
+
+		}
+
+		c.IndentedJSON(http.StatusOK, gin.H{"message": "No content"})
+		
+	} else {
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"message": "file does not exist"})
+	}
+	log.Print()
 }
 
 func PostFile(c *gin.Context) {
-	var file File
-	var id int
-	var extensionn = filepath.Ext(file.name)
-	var namee = file.name[0 : len(file.name)-len(extensionn)]
+	var (
+		file       File
+		id         int
+		extensionn = filepath.Ext(file.name)
+		namee      = file.name[0 : len(file.name)-len(extensionn)]
+	)
 	data := "go"
 	sEnc := b64.StdEncoding.EncodeToString([]byte(data))
 	fmt.Println(sEnc)
@@ -215,4 +227,17 @@ func PostFile(c *gin.Context) {
 	idd := lastInsertId
 
 	c.Redirect(http.StatusFound, "/files/"+strconv.Itoa(int(idd)))
+}
+
+func GetFiles(c *gin.Context) {
+	files, err := getFilesFromDB()
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	if len(files) == 0 {
+		c.IndentedJSON(http.StatusNotFound, gin.H{"message": "file not found"})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, files)
 }
