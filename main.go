@@ -1,9 +1,11 @@
 package main
 
 import (
+	//"bytes"
 	"database/sql"
-	b64 "encoding/base64"
+	//b64 "encoding/base64"
 	"fmt"
+	//"io"
 	"log"
 	"net/http"
 	"os"
@@ -155,25 +157,23 @@ func getFileByID(id int) (File, error) {
 }
 
 func updateFile(c *gin.Context) {
-	id := c.Param("id")
-	var file File
-	file.name = "kicia"
+    id := c.Param("id")
 
-	if err := c.ShouldBindJSON(&file); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	
-	query := "UPDATE file_info SET name = ?, extension = ?, size = ? WHERE id = ?"
-	_, err := db.Exec(query, file.name, file.extension, file.size, id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Something went wrong"})
-		return
-	}
-	
-	fmt.Println(err.Error())
-	c.JSON(http.StatusOK, gin.H{"message": "File updated successfully"})
-	log.Print(file)
+    var file File
+    err := c.Bind(&file)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "File not found"})
+        return
+    }
+
+    query := "UPDATE file_info SET name = ?, create_date = ?, extension = ?, size = ? WHERE id = ?"
+    _, err = db.Exec(query, file.name, file.create_date, file.extension, file.size, id)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Something went wrong"})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{"message": "File info updated successfully"})
 }
 
 func deleteFile(c *gin.Context) {
@@ -214,16 +214,8 @@ func deleteFile(c *gin.Context) {
 func PostFile(c *gin.Context) {
 	var (
 		file       File
-		//extensionn = filepath.Ext(file.name)
-		//namee      = file.name[0 : len(file.name)-len(extensionn)]
-		//fileContent FileContent
 	)
-	data := "go"
-	sEnc := b64.StdEncoding.EncodeToString([]byte(data))
-	fmt.Println(sEnc)
-	sDec, _ := b64.StdEncoding.DecodeString(sEnc)
-	fmt.Println(string(sDec))
-	uEnc := b64.URLEncoding.EncodeToString([]byte(data))
+	
 
 	fileInfoStmt, err := db.Prepare("INSERT INTO file_info(name, create_date, extension, size) VALUES (?, ?, ?, ?)")
 	if err != nil {
@@ -238,23 +230,18 @@ func PostFile(c *gin.Context) {
 	if err != nil {
 		fmt.Println(err)
 	}
-
+	c.IndentedJSON(http.StatusFound, "/files/"+strconv.Itoa(int(lastFileInfoInsertId)))
 	
-	fileContentStmt, err := db.Prepare("INSERT INTO file_content(content, file_info_id) VALUES (?, ?)")
+	fileContentStmt, err := db.Prepare("INSERT INTO file_content(content) VALUES (?)")
 	if err != nil {
 		fmt.Println(err)
 	}
 	defer fileContentStmt.Close()
-	fileContentResult, err := fileContentStmt.Exec(uEnc, lastFileInfoInsertId)
-	if err != nil {
-		fmt.Println(err)
-	}
-	lastFileContentInsertId, err := fileContentResult.LastInsertId()
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	c.IndentedJSON(http.StatusFound, "/files/"+strconv.Itoa(int(lastFileContentInsertId)))
+	c.IndentedJSON(http.StatusFound, gin.H{"message": "file ok"})
 }
 
 
