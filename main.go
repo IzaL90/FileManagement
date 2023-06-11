@@ -3,12 +3,17 @@ package main
 import (
 	//"bytes"
 	"database/sql"
+	"io/ioutil"
+	"path/filepath"
+	"time"
+
 	//b64 "encoding/base64"
 	"fmt"
 	//"io"
 	"log"
 	"net/http"
 	"os"
+
 	//"path/filepath"
 	"strconv"
 
@@ -20,17 +25,15 @@ import (
 type File struct {
 	id          int
 	name        string
-	create_date []uint8
+	create_date time.Time
 	extension   string
 	size        string
 }
 
-type FileContent struct{
-	ID          int
-    Content     []byte
-    FileInfoID  int
-
-
+type FileContent struct {
+	ID         int
+	Content    []byte
+	FileInfoID int
 }
 
 func getDbConnection() (*sql.DB, error) {
@@ -105,13 +108,15 @@ func GetFileById(c *gin.Context) {
 	id := c.Param("id")
 	intID, err := strconv.Atoi(id)
 	if err != nil {
-		fmt.Println(err)
-	} else {
-		fmt.Println(intID)
-	}
-	log.Print(err)
+		log.Print(err)
+		c.IndentedJSON(http.StatusBadRequest, gin.H{"message": "invalid id"})
+		return
+	} 
 
 	files, err := getFileByID(intID)
+	if err != nil{
+		c.IndentedJSON(http.StatusInternalServerError, gin.H{"message": "internal server error"})
+	}
 
 	if files.id == 0 {
 		c.IndentedJSON(http.StatusNotFound, gin.H{"message": "id not found"})
@@ -157,23 +162,23 @@ func getFileByID(id int) (File, error) {
 }
 
 func updateFile(c *gin.Context) {
-    id := c.Param("id")
+	id := c.Param("id")
 
-    var file File
-    err := c.Bind(&file)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "File not found"})
-        return
-    }
+	var file File
+	err := c.Bind(&file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File not found"})
+		return
+	}
 
-    query := "UPDATE file_info SET name = ?, create_date = ?, extension = ?, size = ? WHERE id = ?"
-    _, err = db.Exec(query, file.name, file.create_date, file.extension, file.size, id)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Something went wrong"})
-        return
-    }
+	query := "UPDATE file_info SET name = ?, create_date = ?, extension = ?, size = ? WHERE id = ?"
+	_, err = db.Exec(query, file.name, file.create_date, file.extension, file.size, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Something went wrong"})
+		return
+	}
 
-    c.JSON(http.StatusOK, gin.H{"message": "File info updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "File info updated successfully"})
 }
 
 func deleteFile(c *gin.Context) {
@@ -188,7 +193,6 @@ func deleteFile(c *gin.Context) {
 	}
 	fmt.Println(err)
 
-	
 	if fileExist {
 		_, err = db.Exec("DELETE FROM file_info WHERE id=?", id)
 		if err != nil {
@@ -204,45 +208,85 @@ func deleteFile(c *gin.Context) {
 		}
 
 		c.IndentedJSON(http.StatusOK, gin.H{"message": "No content"})
-		
+
 	} else {
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"message": "file does not exist"})
 	}
-	
+
 }
 
 func PostFile(c *gin.Context) {
-	var (
-		file       File
-	)
-	
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Upload file error: %s", err.Error())})
+		return
+	}
+
+	fileContent, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		log.Print(err)
+		return
+	}
+	defer fileContent.Close()
+
+	fileContentBytes, err := ioutil.ReadAll(fileContent)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		log.Print(err)
+		return
+	}
+
+	fileSize := len(fileContentBytes)
+	fileExtension := filepath.Ext(file.Filename)
+
+	fileInfoData := File{
+		name:        file.Filename,
+		create_date: time.Now().UTC(),
+		extension:   fileExtension,
+		size:        fmt.Sprintf("%d", fileSize),
+	}
 
 	fileInfoStmt, err := db.Prepare("INSERT INTO file_info(name, create_date, extension, size) VALUES (?, ?, ?, ?)")
 	if err != nil {
-		fmt.Println(err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		log.Print(err)
+		return
 	}
 	defer fileInfoStmt.Close()
-	fileInfoResult, err := fileInfoStmt.Exec(file.name, file.create_date, file.extension, file.size)
+
+	fileInfoResult, err := fileInfoStmt.Exec(fileInfoData.name, fileInfoData.create_date, fileInfoData.extension, fileInfoData.size)
 	if err != nil {
-		fmt.Println(err)
-	}
-	lastFileInfoInsertId, err := fileInfoResult.LastInsertId()
-	if err != nil {
-		fmt.Println(err)
-	}
-	c.IndentedJSON(http.StatusFound, "/files/"+strconv.Itoa(int(lastFileInfoInsertId)))
-	
-	fileContentStmt, err := db.Prepare("INSERT INTO file_content(content) VALUES (?)")
-	if err != nil {
-		fmt.Println(err)
-	}
-	defer fileContentStmt.Close()
-	if err != nil {
-		fmt.Println(err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		log.Print(err)
+		return
 	}
 
-	c.IndentedJSON(http.StatusFound, gin.H{"message": "file ok"})
+	lastFileInfoInsertID, err := fileInfoResult.LastInsertId()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		log.Print(err)
+		return
+	}
+
+	fileContentStmt, err := db.Prepare("INSERT INTO file_content(content, file_info_id) VALUES (?, ?)")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		log.Print(err)
+		return
+	}
+	defer fileContentStmt.Close()
+
+	_, err = fileContentStmt.Exec(fileContentBytes, lastFileInfoInsertID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		log.Print(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "File was uploaded"})
 }
+
 
 
 func GetFiles(c *gin.Context) {
@@ -251,9 +295,6 @@ func GetFiles(c *gin.Context) {
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
-	if len(files) == 0 {
-		c.IndentedJSON(http.StatusNotFound, gin.H{"message": "file not found"})
-		return
-	}
+
 	c.IndentedJSON(http.StatusOK, files)
 }
