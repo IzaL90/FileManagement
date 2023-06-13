@@ -1,21 +1,15 @@
 package main
 
 import (
-	//"bytes"
 	"database/sql"
-	"io/ioutil"
-	"path/filepath"
-	"time"
-
-	//b64 "encoding/base64"
 	"fmt"
-	//"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-
-	//"path/filepath"
+	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
@@ -96,7 +90,6 @@ func main() {
 
 	router := gin.Default()
 	router.GET("/files", GetFiles)
-	//fmt.Println(getFileByID(1))
 	router.GET("/files/:id", GetFileById)
 	router.POST("/file", PostFile)
 	router.PUT("/files/:id", updateFile)
@@ -111,10 +104,10 @@ func GetFileById(c *gin.Context) {
 		log.Print(err)
 		c.IndentedJSON(http.StatusBadRequest, gin.H{"message": "invalid id"})
 		return
-	} 
+	}
 
 	files, err := getFileByID(intID)
-	if err != nil{
+	if err != nil {
 		c.IndentedJSON(http.StatusInternalServerError, gin.H{"message": "internal server error"})
 	}
 
@@ -164,8 +157,22 @@ func getFileByID(id int) (File, error) {
 func updateFile(c *gin.Context) {
 	id := c.Param("id")
 
-	var file File
-	err := c.Bind(&file)
+	var (
+		fileExist bool
+		file      File
+	)
+	err := db.QueryRow("SELECT CASE COUNT(1) WHEN 0 THEN FALSE ELSE TRUE END FROM file_info WHERE id = ?", id).Scan(&fileExist)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Something went wrong"})
+		return
+	}
+
+	if !fileExist {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	err = c.Bind(&file)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File not found"})
 		return
@@ -230,14 +237,7 @@ func PostFile(c *gin.Context) {
 	}
 	defer fileContent.Close()
 
-	fileContentBytes, err := ioutil.ReadAll(fileContent)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
-		log.Print(err)
-		return
-	}
-
-	fileSize := len(fileContentBytes)
+	fileSize := file.Size
 	fileExtension := filepath.Ext(file.Filename)
 
 	fileInfoData := File{
@@ -269,6 +269,13 @@ func PostFile(c *gin.Context) {
 		return
 	}
 
+	fileContentBytes, err := ioutil.ReadAll(fileContent)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		log.Print(err)
+		return
+	}
+
 	fileContentStmt, err := db.Prepare("INSERT INTO file_content(content, file_info_id) VALUES (?, ?)")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
@@ -286,8 +293,6 @@ func PostFile(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "File was uploaded"})
 }
-
-
 
 func GetFiles(c *gin.Context) {
 	files, err := getFilesFromDB()
